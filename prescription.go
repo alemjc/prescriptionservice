@@ -10,4 +10,6 @@ type Prescription struct {
 	Time       string        `bson:"time" json: "time, omitempty"`
 	Name       string        `bson:"name" json: "name"`
 	ID         bson.ObjectId `bson:"_id,omitempty" json:"id, omitempty"`
+	// prescription owner
+	Owner string `bson:"owner,omitempty" json:"owner, omitempty"`
 }

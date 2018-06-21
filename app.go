@@ -2,19 +2,42 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
 	"gopkg.in/mgo.v2/bson"
 )
 
-// TODO create handles for login/register users and modify every endpoint handle so that they check basic authentication credentials
+const (
+	serverKey               = "server.key"
+	serverCert              = "server.crt"
+	prescriptionsCollection = "prescriptions"
+	usersCollection         = "users"
+)
+
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+		_, err := r.Cookie("username")
+		path := r.RequestURI
+
+		if err != nil && !strings.Contains(path, "/register") && !strings.Contains(path, "/login") {
+			http.Error(w, "Unathorized", http.StatusUnauthorized)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
 
 // viewPrescription will take of servicing prescriptions to the caller. The
 // call would be made with the following format
@@ -23,16 +46,21 @@ import (
 func viewPrescription(w http.ResponseWriter, r *http.Request, ds DataSource) {
 
 	vars := mux.Vars(r)
-	collection := "prescriptions"
+	cookie, err := r.Cookie("username")
+
+	if err != nil {
+		http.Error(w, "", http.StatusUnauthorized)
+		return
+	}
 
 	fmt.Printf("vars[id]: %s\n", vars["id"])
 
-	prescriptionQuery := Prescription{ID: bson.ObjectIdHex(vars["id"])}
+	query := bson.M{"_id": bson.ObjectIdHex(vars["id"]), "owner": cookie.Value}
 
-	result, err := ds.FindOne(prescriptionQuery, collection)
+	result, err := ds.FindOne(query, prescriptionsCollection)
 
 	if err != nil {
-		log.Printf("Could not retrieve record for the following query %v\n", prescriptionQuery)
+		log.Printf("Could not retrieve record for the following query %v\n", query)
 		w.WriteHeader(http.StatusNotFound)
 		fmt.Fprintf(w, "could not retreive record")
 	} else {
@@ -51,13 +79,24 @@ func updatePrescription(w http.ResponseWriter, r *http.Request, ds DataSource) {
 	vars := mux.Vars(r)
 	prescription := Prescription{}
 	bodyReader := r.Body
-	collection := "prescriptions"
+	cookie, err := r.Cookie("username")
+
+	if err != nil {
+		http.Error(w, "", http.StatusUnauthorized)
+		return
+	}
 
 	decoder := json.NewDecoder(bodyReader)
-	err := decoder.Decode(&prescription)
+	err = decoder.Decode(&prescription)
 	log.Printf("decoded prescription is as follows: %v", prescription)
 	prescription.ID = bson.ObjectIdHex(vars["id"])
-	err = ds.Update(prescription, collection)
+
+	update := bson.M{"$set": bson.M{"time": prescription.Time, "name": prescription.Name, "directions": prescription.Directions,
+		"owner": cookie.Value}}
+
+	query := bson.M{"_id": prescription.ID}
+
+	err = ds.Update(query, update, prescriptionsCollection)
 
 	if err != nil {
 		log.Printf("error happened when updating record in database")
@@ -75,11 +114,16 @@ func updatePrescription(w http.ResponseWriter, r *http.Request, ds DataSource) {
 func createPrescription(w http.ResponseWriter, r *http.Request, ds DataSource) {
 	prescription := Prescription{}
 	bodyReader := r.Body
-	collection := "prescriptions"
+	cookie, err := r.Cookie("username")
+
+	if err != nil {
+		http.Error(w, "", http.StatusUnauthorized)
+		return
+	}
 
 	decoder := json.NewDecoder(bodyReader)
 
-	err := decoder.Decode(&prescription)
+	err = decoder.Decode(&prescription)
 
 	prescription.ID = bson.ObjectId(ds.NewID())
 	log.Printf("decoded prescription is as follows: %v", prescription)
@@ -88,7 +132,9 @@ func createPrescription(w http.ResponseWriter, r *http.Request, ds DataSource) {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprint(w, "Error parsing body of request")
 	} else {
-		record, err := ds.Insert(prescription, collection)
+		query := bson.M{"_id": prescription.ID, "name": prescription.Name, "directions": prescription.Directions,
+			"owner": cookie.Value, "time": prescription.Time}
+		record, err := ds.Insert(query, prescriptionsCollection)
 		_ = record
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -113,10 +159,18 @@ func createPrescription(w http.ResponseWriter, r *http.Request, ds DataSource) {
 // curl -X DELETE http://<hostname>:<port>/prescription/{prescription id}
 func deletePrescription(w http.ResponseWriter, r *http.Request, ds DataSource) {
 	vars := mux.Vars(r)
-	collection := "prescriptions"
-	queryPrescription := Prescription{ID: bson.ObjectIdHex(vars["id"])}
 
-	err := ds.Remove(queryPrescription, collection)
+	cookie, err := r.Cookie("username")
+
+	if err != nil {
+		http.Error(w, fmt.Sprintf("%v", err), http.StatusUnauthorized)
+		return
+	}
+
+	// queryPrescription := Prescription{ID: bson.ObjectIdHex(vars["id"])}
+	query := bson.M{"_id": bson.ObjectIdHex(vars["id"]), "owner": cookie.Value}
+
+	err = ds.Remove(query, prescriptionsCollection)
 
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
@@ -129,7 +183,14 @@ func deletePrescription(w http.ResponseWriter, r *http.Request, ds DataSource) {
 // curl http://<hostname>:<port>/prescriptions
 func listPrescriptions(w http.ResponseWriter, r *http.Request, ds DataSource) {
 	collection := "prescriptions"
-	prescriptions, err := ds.FindAll(collection)
+	cookie, err := r.Cookie("username")
+
+	if err != nil {
+		http.Error(w, "", http.StatusUnauthorized)
+		return
+	}
+
+	prescriptions, err := ds.FindAll(bson.M{"owner": cookie.Value}, collection)
 
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -139,6 +200,93 @@ func listPrescriptions(w http.ResponseWriter, r *http.Request, ds DataSource) {
 		encoder := json.NewEncoder(w)
 		encoder.Encode(prescriptions)
 	}
+}
+
+// checkCredentials will check a users credentials against the datasource and set a cookie if the credentials
+// matched correctly
+func checkCredentials(w http.ResponseWriter, r *http.Request, ds DataSource) {
+
+	var creds string
+	auth := strings.SplitN(r.Header.Get("Authorization"), " ", 2)
+
+	if len(auth) != 2 || auth[0] != "Basic" {
+		http.Error(w, "authorization failed", http.StatusUnauthorized)
+	}
+
+	log.Printf("register user authentication credentials is as follows: %s\n", auth[1])
+	byteCreds, err := base64.StdEncoding.DecodeString(auth[1])
+
+	if err != nil {
+		http.Error(w, "Error decoding authentication credentails", http.StatusInternalServerError)
+		return
+	}
+
+	creds = string(byteCreds[:])
+
+	log.Printf("credentails are as follows: %s\n", creds)
+
+	credsArray := strings.SplitN(creds, ":", 2)
+	hasher := sha256.New()
+	hasher.Write([]byte(credsArray[1]))
+
+	password := string(hasher.Sum(nil))
+
+	user, err := ds.FindOne(bson.M{"username": creds[0]}, usersCollection)
+
+	if err != nil {
+		http.Error(w, "wrong username", http.StatusUnauthorized)
+		return
+	}
+
+	if user.(User).Password != password {
+		http.Error(w, "wrong password", http.StatusUnauthorized)
+		return
+	}
+
+	expiration := time.Now().Add(time.Hour)
+	http.SetCookie(w, &http.Cookie{Name: "username", Value: credsArray[0], Expires: expiration})
+	w.WriteHeader(http.StatusOK)
+}
+
+// will create a new user in the datasource. will return a cookie after successful registration
+func registerUser(w http.ResponseWriter, r *http.Request, ds DataSource) {
+	var creds string
+	auth := strings.SplitN(r.Header.Get("Authorization"), " ", 2)
+
+	if len(auth) != 2 || auth[0] != "Basic" {
+		http.Error(w, "authorization failed", http.StatusUnauthorized)
+	}
+
+	log.Printf("register user authentication credentials is as follows: %s\n", auth[1])
+	byteCreds, err := base64.StdEncoding.DecodeString(auth[1])
+
+	if err != nil {
+		http.Error(w, "Error decoding authentication credentials", http.StatusInternalServerError)
+		return
+	}
+
+	creds = string(byteCreds[:])
+
+	log.Printf("credentials are as follows: %s\n", creds)
+
+	credsArray := strings.SplitN(creds, ":", 2)
+	hasher := sha256.New()
+	hasher.Write([]byte(credsArray[1]))
+
+	user := User{Username: credsArray[0], Password: string(hasher.Sum(nil))}
+
+	_, err = ds.Insert(user, usersCollection)
+
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Could not create user\n%v", err), http.StatusInternalServerError)
+		return
+	}
+
+	expiration := time.Now().Add(time.Hour)
+
+	http.SetCookie(w, &http.Cookie{Name: "username", Value: credsArray[0], Expires: expiration})
+
+	w.WriteHeader(http.StatusOK)
 }
 
 func makeHandle(fn func(http.ResponseWriter, *http.Request, DataSource), ds DataSource) func(http.ResponseWriter, *http.Request) {
@@ -163,9 +311,10 @@ func main() {
 	flag.DurationVar(&timeOut, "graceful-timeout", timeOut*15, "the duration for which the server gracefully shutsdown")
 	flag.Parse()
 	mx := mux.NewRouter()
+	mx.Use(loggingMiddleware)
 
 	serv := &http.Server{
-		Addr:         "0.0.0.0:8080",
+		Addr:         ":8081",
 		WriteTimeout: time.Second * 15,
 		ReadTimeout:  time.Second * 15,
 		IdleTimeout:  time.Second * 60,
@@ -173,6 +322,8 @@ func main() {
 	}
 
 	// TODO: create registration link and login link
+	mx.HandleFunc("/register", makeHandle(registerUser, ds)).Methods("POST")
+	mx.HandleFunc("/login", makeHandle(checkCredentials, ds)).Methods("POST")
 	mx.HandleFunc("/prescription/{id}", makeHandle(viewPrescription, ds)).Methods("GET")
 	mx.HandleFunc("/prescription/{id}", makeHandle(updatePrescription, ds)).Methods("PUT")
 	mx.HandleFunc("/prescription", makeHandle(createPrescription, ds)).Methods("POST")
@@ -181,7 +332,7 @@ func main() {
 
 	// TODO: make server listen over tls/ssl with basic authentication
 	go func() {
-		if err := serv.ListenAndServe(); err != nil {
+		if err := serv.ListenAndServeTLS(serverCert, serverKey); err != nil {
 			log.Fatal(err)
 		}
 	}()

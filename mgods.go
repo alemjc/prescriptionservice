@@ -24,27 +24,28 @@ func (mgods *Mgods) NewID() string {
 }
 
 // FindAll returns all records in the data storage
-func (mgods *Mgods) FindAll(collection string) ([]Prescription, error) {
-	var result []Prescription
+func (mgods *Mgods) FindAll(query interface{}, collection string) ([]interface{}, error) {
+	var result []interface{}
 	db := mgods.session.DB(mgods.db)
-	err := db.C(collection).Find(bson.M{}).All(&result)
+	err := db.C(collection).Find(query.(bson.M)).All(&result)
 
 	return result, err
 }
 
 // FindOne will find a result based on the passed query structure and return a result that match
-func (mgods *Mgods) FindOne(query Prescription, collection string) (Prescription, error) {
+func (mgods *Mgods) FindOne(query interface{}, collection string) (interface{}, error) {
 
-	var result Prescription
+	var result interface{}
 	db := mgods.session.DB(mgods.db)
 
-	err := db.C(collection).Find(bson.M{"_id": query.ID}).One(&result)
+	// err := db.C(collection).Find(bson.M{"_id": query.ID}).One(&result)
+	err := db.C(collection).Find(query.(bson.M)).One(&result)
 	return result, err
 
 }
 
 // Insert will insert the passed record into the array, it will return a return with a unique id
-func (mgods *Mgods) Insert(record Prescription, collection string) (Prescription, error) {
+func (mgods *Mgods) Insert(record interface{}, collection string) (interface{}, error) {
 
 	db := mgods.session.DB(mgods.db)
 
@@ -57,18 +58,19 @@ func (mgods *Mgods) Insert(record Prescription, collection string) (Prescription
 // Update will update a record in the database. The client of this method will
 // send the required fields to update with their value as a struct as well as a query struct
 // that will be used to find the record(s) to udpate
-func (mgods *Mgods) Update(updateFields Prescription, collection string) error {
+func (mgods *Mgods) Update(query interface{}, change interface{}, collection string) error {
 	db := mgods.session.DB(mgods.db)
-	change := bson.M{"$set": updateFields}
-	err := db.C(collection).Update(bson.M{"_id": updateFields.ID}, change)
+	// change := bson.M{"$set": updateFields}
+	// err := db.C(collection).Update(bson.M{"_id": updateFields.ID}, change)
+	err := db.C(collection).Update(query.(bson.M), change.(bson.M))
 
 	return err
 }
 
 // Remove will delete a record from the data source
-func (mgods *Mgods) Remove(queryStructure Prescription, collection string) error {
+func (mgods *Mgods) Remove(query interface{}, collection string) error {
 	db := mgods.session.DB(mgods.db)
-	err := db.C(collection).Remove(bson.M{"_id": queryStructure.ID})
+	err := db.C(collection).Remove(query.(bson.M))
 
 	return err
 }

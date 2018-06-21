@@ -2,11 +2,11 @@ package main
 
 // DataSource serves simple methods to access an underlying Data Store
 type DataSource interface {
-	FindAll(string) ([]Prescription, error)
-	FindOne(Prescription, string) (Prescription, error)
-	Insert(Prescription, string) (Prescription, error)
-	Update(Prescription, string) error
-	Remove(Prescription, string) error
+	FindAll(interface{}, string) ([]interface{}, error)
+	FindOne(interface{}, string) (interface{}, error)
+	Insert(interface{}, string) (interface{}, error)
+	Update(interface{}, interface{}, string) error
+	Remove(interface{}, string) error
 	NewID() string
 	Close()
 }
