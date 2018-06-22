@@ -46,6 +46,7 @@ func loggingMiddleware(next http.Handler) http.Handler {
 func viewPrescription(w http.ResponseWriter, r *http.Request, ds DataSource) {
 
 	vars := mux.Vars(r)
+	var prescription Prescription
 	cookie, err := r.Cookie("username")
 
 	if err != nil {
@@ -57,17 +58,17 @@ func viewPrescription(w http.ResponseWriter, r *http.Request, ds DataSource) {
 
 	query := bson.M{"_id": bson.ObjectIdHex(vars["id"]), "owner": cookie.Value}
 
-	result, err := ds.FindOne(query, prescriptionsCollection)
+	err = ds.FindOne(query, &prescription, prescriptionsCollection)
 
 	if err != nil {
 		log.Printf("Could not retrieve record for the following query %v\n", query)
 		w.WriteHeader(http.StatusNotFound)
 		fmt.Fprintf(w, "could not retreive record")
 	} else {
-		log.Printf("retrieved record %v\n", result)
+		log.Printf("retrieved record %v\n", prescription)
 		w.WriteHeader(http.StatusOK)
 		encoder := json.NewEncoder(w)
-		encoder.Encode(result)
+		encoder.Encode(prescription)
 	}
 
 }
@@ -134,14 +135,14 @@ func createPrescription(w http.ResponseWriter, r *http.Request, ds DataSource) {
 	} else {
 		query := bson.M{"_id": prescription.ID, "name": prescription.Name, "directions": prescription.Directions,
 			"owner": cookie.Value, "time": prescription.Time}
-		record, err := ds.Insert(query, prescriptionsCollection)
-		_ = record
+		err := ds.Insert(query, prescriptionsCollection)
+
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			fmt.Fprintf(w, "%f", err)
 		} else {
 			encoder := json.NewEncoder(w)
-			err := encoder.Encode(&record)
+			err := encoder.Encode(&prescription)
 
 			if err != nil {
 				w.WriteHeader(http.StatusOK)
@@ -182,7 +183,7 @@ func deletePrescription(w http.ResponseWriter, r *http.Request, ds DataSource) {
 // Will return a list of all prescription for this user
 // curl http://<hostname>:<port>/prescriptions
 func listPrescriptions(w http.ResponseWriter, r *http.Request, ds DataSource) {
-	collection := "prescriptions"
+	prescriptions := make([]Prescription, 0, 10)
 	cookie, err := r.Cookie("username")
 
 	if err != nil {
@@ -190,7 +191,7 @@ func listPrescriptions(w http.ResponseWriter, r *http.Request, ds DataSource) {
 		return
 	}
 
-	prescriptions, err := ds.FindAll(bson.M{"owner": cookie.Value}, collection)
+	err = ds.FindAll(bson.M{"owner": cookie.Value}, &prescriptions, prescriptionsCollection)
 
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -207,6 +208,7 @@ func listPrescriptions(w http.ResponseWriter, r *http.Request, ds DataSource) {
 func checkCredentials(w http.ResponseWriter, r *http.Request, ds DataSource) {
 
 	var creds string
+	var user User
 	auth := strings.SplitN(r.Header.Get("Authorization"), " ", 2)
 
 	if len(auth) != 2 || auth[0] != "Basic" {
@@ -231,14 +233,14 @@ func checkCredentials(w http.ResponseWriter, r *http.Request, ds DataSource) {
 
 	password := string(hasher.Sum(nil))
 
-	user, err := ds.FindOne(bson.M{"username": creds[0]}, usersCollection)
+	err = ds.FindOne(bson.M{"username": credsArray[0]}, &user, usersCollection)
 
 	if err != nil {
 		http.Error(w, "wrong username", http.StatusUnauthorized)
 		return
 	}
 
-	if user.(User).Password != password {
+	if user.Password != password {
 		http.Error(w, "wrong password", http.StatusUnauthorized)
 		return
 	}
@@ -275,7 +277,7 @@ func registerUser(w http.ResponseWriter, r *http.Request, ds DataSource) {
 
 	user := User{Username: credsArray[0], Password: string(hasher.Sum(nil))}
 
-	_, err = ds.Insert(user, usersCollection)
+	err = ds.Insert(user, usersCollection)
 
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Could not create user\n%v", err), http.StatusInternalServerError)
