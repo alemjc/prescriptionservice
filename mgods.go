@@ -24,35 +24,33 @@ func (mgods *Mgods) NewID() string {
 }
 
 // FindAll returns all records in the data storage
-func (mgods *Mgods) FindAll(query interface{}, collection string) ([]interface{}, error) {
-	var result []interface{}
+func (mgods *Mgods) FindAll(query interface{}, result interface{}, collection string) error {
 	db := mgods.session.DB(mgods.db)
-	err := db.C(collection).Find(query.(bson.M)).All(&result)
+	err := db.C(collection).Find(query.(bson.M)).All(result)
 
-	return result, err
+	return err
 }
 
 // FindOne will find a result based on the passed query structure and return a result that match
-func (mgods *Mgods) FindOne(query interface{}, collection string) (interface{}, error) {
+func (mgods *Mgods) FindOne(query interface{}, result interface{}, collection string) error {
 
-	var result interface{}
 	db := mgods.session.DB(mgods.db)
 
 	// err := db.C(collection).Find(bson.M{"_id": query.ID}).One(&result)
-	err := db.C(collection).Find(query.(bson.M)).One(&result)
-	return result, err
+	err := db.C(collection).Find(query.(bson.M)).One(result)
+	return err
 
 }
 
 // Insert will insert the passed record into the array, it will return a return with a unique id
-func (mgods *Mgods) Insert(record interface{}, collection string) (interface{}, error) {
+func (mgods *Mgods) Insert(record interface{}, collection string) error {
 
 	db := mgods.session.DB(mgods.db)
 
 	fmt.Printf("record to write to collection %s record: %v\n", collection, record)
 	err := db.C(collection).Insert(&record)
 
-	return record, err
+	return err
 }
 
 // Update will update a record in the database. The client of this method will
